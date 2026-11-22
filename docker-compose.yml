@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: univ
+      POSTGRES_PASSWORD: univpass
+      POSTGRES_DB: univdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U univ -d univdb"]
+      interval: 5s
+      retries: 10
+  web:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://univ:univpass@db:5432/univdb
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: ChangeMe123
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend]
+networks:
+  backend:
+volumes:
+  pgdata:

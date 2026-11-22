@@ -13,16 +13,22 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 BASE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>University of Atlas</title>
-<style>body{font-family:sans-serif;max-width:800px;margin:auto;padding:1rem;line-height:1.5}
-nav a{margin-right:1rem}.card{border:1px solid #ccc;border-radius:8px;padding:.8rem;margin:.8rem 0}
-input,textarea{width:100%;padding:.5rem;margin:.3rem 0 .8rem}button{padding:.5rem 1rem}
-small{color:#666}</style></head><body>
+<style>
+body{font-family:system-ui,sans-serif;max-width:800px;margin:auto;padding:1rem;line-height:1.6;background:#f4f6fb;color:#1b2a41}
+h1{background:#1f3a68;color:#fff;padding:1rem;border-radius:10px;margin-bottom:.5rem}
+nav{background:#fff;padding:.7rem;border-radius:10px}
+nav a{margin-right:1rem;color:#1f3a68;font-weight:600;text-decoration:none}
+.card{background:#fff;border-radius:10px;padding:1rem;margin:.8rem 0;box-shadow:0 1px 4px #0002}
+input,textarea{width:100%;padding:.6rem;margin:.3rem 0 .8rem;border:1px solid #ccd;border-radius:6px;box-sizing:border-box}
+button{padding:.5rem 1rem;background:#1f3a68;color:#fff;border:0;border-radius:6px}
+small{color:#667}
+</style></head><body>
 <h1>University of Atlas</h1>
-<nav><a href="/">Home</a><a href="/departments">Departments</a><a href="/news">News</a><a href="/admin">Admin</a></nav><hr>
+<nav><a href="/">Home</a><a href="/departments">Departments</a><a href="/news">News</a><a href="/admin">Admin</a></nav>
 {% block c %}{% endblock %}</body></html>"""
 
 HOME = """{% extends 'base' %}{% block c %}
-<p>Welcome to the (fictional) University of Atlas, founded in 1965.</p>
+<div class="card"><p>Welcome to the (fictional) University of Atlas, founded in 1965.</p></div>
 <h2>Recent announcements</h2>
 {% for a in items %}<div class="card"><b>{{a.title}}</b><br><small>{{a.created_at.strftime('%Y-%m-%d')}}</small><p>{{a.content}}</p></div>
 {% else %}<p>No announcements yet.</p>{% endfor %}{% endblock %}"""
@@ -48,7 +54,7 @@ app.jinja_loader = DictLoader({"base": BASE, "home": HOME, "depts": DEPTS,
                                "news": NEWS, "admin": ADMIN, "form": FORM})
 
 def run(sql, args=(), fetch=False):
-    conn = psycopg2.connect(DB_URL)
+    conn = psycopg2.connect(DB_URL, options="-c search_path=univapp,public")
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, args)
@@ -59,6 +65,7 @@ def run(sql, args=(), fetch=False):
 def init_db():
     for _ in range(30):
         try:
+            run("CREATE SCHEMA IF NOT EXISTS univapp")
             run("""CREATE TABLE IF NOT EXISTS departments(
                      id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL);
                    CREATE TABLE IF NOT EXISTS announcements(
@@ -127,3 +134,5 @@ def delete(i):
     return redirect(url_for("admin"))
 
 init_db()
+
+

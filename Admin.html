@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Administration – University M’hamed Bougara of Boumerdes</title>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body data-page="admin">
+<main>
+<section class="sec"><div class="row"><h1 style="margin:0;font-size:32px">Manage announcements</h1><div><button class="bt" id="newBtn">New announcement</button> <button class="b2" id="logout">Log out</button></div></div>
+<div class="g" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr))">
+<div class="tb"><table><thead><tr><th>Title</th><th>Category</th><th>Date</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div>
+<form class="cd" id="annForm"><h3 id="formTitle">New announcement</h3><input type="hidden" id="id">
+<label for="title">Title</label><input id="title" required maxlength="150">
+<label for="category">Category</label><select id="category"><option>Registrations</option><option>Event</option><option>Examinations</option><option>Conference</option><option>Information</option></select>
+<label for="content">Content</label><textarea id="content" rows="5" required></textarea>
+<div style="margin-top:20px"><button class="bt">Save</button></div><div id="msg" role="status"></div></form></div></section>
+</main>
+</body>
+</html>

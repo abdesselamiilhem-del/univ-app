@@ -1,72 +1,23 @@
-import os, time
+import os, time, hmac, hashlib
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from functools import wraps
-from flask import Flask, request, redirect, url_for, Response, render_template, send_file, abort
-from jinja2 import DictLoader
+from flask import Flask, request, jsonify, session, send_file, redirect, abort
 
 app = Flask(__name__)
 DB_URL = os.environ["DATABASE_URL"]
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
-SCHEMA = "umbb"
-CATEGORIES = ["Registrations", "Exams", "Events", "General"]
-IMAGE_FILES = ["campus.jpg", "Image PNG.png"]
+app.secret_key = os.environ.get("SECRET_KEY") or hashlib.sha256(
+    ("portal|" + ADMIN_PASSWORD + DB_URL).encode()).hexdigest()
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
-BASE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>University of Boumerdès</title>
-<style>
-body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:820px;margin:0 auto;padding:0 1rem 2rem;line-height:1.6;background:#f5f7fa;color:#1c2b39}
-header{background:#14365d;color:#fff;padding:1.2rem 1rem;margin:0 -1rem 1rem}
-header h1{margin:0;font-size:1.5rem}
-header p{margin:.2rem 0 0;opacity:.8;font-size:.9rem}
-nav{margin:0 -1rem 1rem;padding:.7rem 1rem;background:#fff;border-bottom:1px solid #dde3ea}
-nav a{margin-right:1.2rem;color:#14365d;font-weight:600;text-decoration:none}
-h2{color:#14365d;margin-top:1.5rem}
-.card{background:#fff;border:1px solid #dde3ea;border-radius:8px;padding:1rem;margin:.8rem 0}
-.card b{color:#14365d}
-.tag{display:inline-block;background:#e4ecf7;color:#14365d;font-size:.75rem;padding:.1rem .6rem;border-radius:99px;margin-left:.4rem}
-.hero{width:100%;max-height:260px;object-fit:cover;border-radius:8px;margin-bottom:.8rem}
-input,textarea,select{width:100%;padding:.6rem;margin:.3rem 0 .9rem;border:1px solid #c5ced8;border-radius:6px;box-sizing:border-box;font:inherit}
-button{padding:.5rem 1.1rem;background:#14365d;color:#fff;border:0;border-radius:6px;font:inherit}
-small{color:#6b7a89}
-footer{margin-top:2rem;padding-top:1rem;border-top:1px solid #dde3ea;font-size:.8rem;color:#6b7a89}
-</style></head><body>
-<header><h1>University of Boumerdès</h1><p>Information and announcements portal</p></header>
-<nav><a href="/">Home</a><a href="/departments">Departments</a><a href="/news">News</a><a href="/admin">Administration</a></nav>
-{% block c %}{% endblock %}
-<footer>Academic project, Cloud Computing. All data shown on this site is sample data.</footer>
-</body></html>"""
+SCHEMA = "portal"
+CATEGORIES = ["Registrations", "Event", "Examinations", "Conference", "Information"]
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SITE_FILES = {"index.html", "departments.html", "announce.html", "login.html",
+              "admin.html", "style.css", "app.js"}
+IMAGES = ["campus.jpg", "Image PNG.png"]
 
-HOME = """{% extends 'base' %}{% block c %}
-<img class="hero" src="/campus" alt="Campus" onerror="this.style.display='none'">
-<div class="card"><p>Welcome to the information portal of the University of Boumerdès (Université M'Hamed Bougara de Boumerdès). Students, teachers and visitors can browse the departments and follow the latest announcements.</p></div>
-<h2>Recent announcements</h2>
-{% for a in items %}<div class="card"><b>{{a.title}}</b><span class="tag">{{a.category}}</span><br><small>{{a.created_at.strftime('%d/%m/%Y')}}</small><p>{{a.content}}</p></div>
-{% else %}<p>No announcements yet.</p>{% endfor %}{% endblock %}"""
-
-DEPTS = """{% extends 'base' %}{% block c %}<h2>Departments</h2>
-{% for d in items %}<div class="card"><b>{{d.name}}</b><p>{{d.description}}</p></div>{% endfor %}{% endblock %}"""
-
-NEWS = """{% extends 'base' %}{% block c %}<h2>News and announcements</h2>
-{% for a in items %}<div class="card"><b>{{a.title}}</b><span class="tag">{{a.category}}</span><br><small>{{a.created_at.strftime('%d/%m/%Y %H:%M')}}</small><p>{{a.content}}</p></div>
-{% else %}<p>No announcements yet.</p>{% endfor %}{% endblock %}"""
-
-ADMIN = """{% extends 'base' %}{% block c %}<h2>Administration</h2>
-<p><a href="/admin/new">+ Add announcement</a></p>
-{% for a in items %}<div class="card"><b>{{a.title}}</b><span class="tag">{{a.category}}</span><p>{{a.content}}</p>
-<a href="/admin/{{a.id}}/edit">Edit</a>
-<form method="post" action="/admin/{{a.id}}/delete" style="display:inline" onsubmit="return confirm('Delete this announcement?')"><button>Delete</button></form></div>{% endfor %}{% endblock %}"""
-
-FORM = """{% extends 'base' %}{% block c %}<h2>{{'Edit' if a else 'New'}} announcement</h2>
-<form method="post"><label>Title</label><input name="title" required value="{{a.title if a else ''}}">
-<label>Category</label><select name="category">{% for c in cats %}<option value="{{c}}" {% if a and a.category == c %}selected{% endif %}>{{c}}</option>{% endfor %}</select>
-<label>Content</label><textarea name="content" rows="6" required>{{a.content if a else ''}}</textarea>
-<button>Save</button></form>{% endblock %}"""
-
-app.jinja_loader = DictLoader({"base": BASE, "home": HOME, "depts": DEPTS,
-                               "news": NEWS, "admin": ADMIN, "form": FORM})
 
 def run(sql, args=(), fetch=False):
     conn = psycopg2.connect(DB_URL, options="-c search_path=%s,public" % SCHEMA)
@@ -77,6 +28,7 @@ def run(sql, args=(), fetch=False):
     finally:
         conn.close()
 
+
 def init_db():
     for _ in range(30):
         try:
@@ -84,92 +36,150 @@ def init_db():
             run("""CREATE TABLE IF NOT EXISTS departments(
                      id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL);
                    CREATE TABLE IF NOT EXISTS announcements(
-                     id SERIAL PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL,
-                     created_at TIMESTAMP DEFAULT now());""")
-            run("ALTER TABLE announcements ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'General'")
+                     id SERIAL PRIMARY KEY, title TEXT NOT NULL,
+                     category TEXT NOT NULL DEFAULT 'Information', content TEXT NOT NULL,
+                     created_at TIMESTAMP NOT NULL DEFAULT now());""")
             if not run("SELECT 1 FROM departments LIMIT 1", fetch=True):
                 run("""INSERT INTO departments(name,description) VALUES
-                  ('Computer Science','Software engineering, networks, databases and artificial intelligence.'),
-                  ('Mathematics','Algebra, analysis, probability and applied mathematics.'),
-                  ('Physics','Fundamental and applied physics, materials and energy.'),
-                  ('Electrical Engineering','Electronics, automation, power systems and telecommunications.'),
-                  ('Mechanical Engineering','Design, thermodynamics, manufacturing and industrial maintenance.'),
-                  ('Hydrocarbons and Chemistry','Process engineering, petroleum technologies and chemical analysis.'),
-                  ('Economics and Management','Finance, accounting, marketing and business administration.'),
-                  ('Languages and Literature','Arabic, French and English language and literature studies.');
-                  INSERT INTO announcements(title,category,content) VALUES
-                  ('Registration for the new academic year','Registrations','Online registration is open for continuing students. Please check the schedule published by your department.'),
-                  ('Library opening hours during exams','Exams','The central library extends its opening hours throughout the examination period.'),
-                  ('Cloud Computing project presentations','Events','Student groups will present their projects during the last practical session.');""")
-            run("UPDATE announcements SET category='Registrations' WHERE title LIKE 'Registration%' AND category='General'")
-            run("UPDATE announcements SET category='Exams' WHERE title LIKE 'Library opening%' AND category='General'")
-            run("UPDATE announcements SET category='Events' WHERE title LIKE 'Cloud Computing project%' AND category='General'")
+                  ('Computer Science','Computer systems, Software Engineering, Artificial Intelligence.'),
+                  ('Mathematics','Applied mathematics, statistics and mathematical modeling.'),
+                  ('Physics','Mechanics, optics, energy, and applied physics.'),
+                  ('Chemistry','The study of matter, its properties, and the changes it undergoes.'),
+                  ('Medicine','The science and practice of diagnosing, treating, and preventing disease.'),
+                  ('Biology','The study of living organisms and their interactions with the environment.'),
+                  ('Agronomy','Techniques and methods to improve agricultural production, protect plants and soil, and develop sustainable agriculture.');
+                  INSERT INTO announcements(title,category,content,created_at) VALUES
+                  ('Registration for the 2026-2027 Academic Year Is Now Open','Registrations','Applications are open until January 15.', now() - interval '25 days'),
+                  ('Campus Open Day','Event','Guided tours and meetings with faculty members.', now() - interval '20 days'),
+                  ('Semester 1 Examination Schedule','Examinations','The schedule is available for all academic programs.', now() - interval '15 days'),
+                  ('Artificial Intelligence Conference','Conference','Amphitheater 100, open to students and visitors.', now() - interval '10 days'),
+                  ('Library Closure for Inventory','Information','Reopening scheduled for January 4.', now() - interval '5 days');""")
             return
         except psycopg2.OperationalError:
             time.sleep(2)
     raise RuntimeError("Database not reachable")
 
-def auth(f):
-    @wraps(f)
-    def w(*a, **k):
-        c = request.authorization
-        if not c or c.username != ADMIN_USER or c.password != ADMIN_PASSWORD:
-            return Response("Login required", 401, {"WWW-Authenticate": 'Basic realm="Admin"'})
-        return f(*a, **k)
-    return w
 
-def clean_category(value):
-    return value if value in CATEGORIES else "General"
+def ann(r):
+    return {"id": r["id"], "title": r["title"], "category": r["category"],
+            "content": r["content"],
+            "created_at": r["created_at"].strftime("%Y-%m-%dT%H:%M:%S")}
 
-@app.route("/campus")
-def campus():
-    base = os.path.dirname(os.path.abspath(__file__))
-    for name in IMAGE_FILES:
-        path = os.path.join(base, name)
-        if os.path.exists(path):
-            return send_file(path)
-    abort(404)
+
+def same(a, b):
+    return hmac.compare_digest(str(a).encode(), str(b).encode())
+
+
+def guard():
+    if not session.get("admin"):
+        return jsonify(error="Authentication required."), 401
+
+
+def read_form():
+    d = request.get_json(silent=True) or {}
+    title = str(d.get("title", "")).strip()
+    content = str(d.get("content", "")).strip()
+    category = d.get("category")
+    if not title or len(title) > 150:
+        return None, "The title is required (150 characters maximum)."
+    if not content:
+        return None, "The content is required."
+    if category not in CATEGORIES:
+        return None, "Invalid category."
+    return (title, category, content), None
+
+
+@app.post("/api/login")
+def api_login():
+    d = request.get_json(silent=True) or {}
+    if same(d.get("username", ""), ADMIN_USER) and same(d.get("password", ""), ADMIN_PASSWORD):
+        session["admin"] = True
+        return jsonify(ok=True)
+    return jsonify(error="Invalid username or password."), 401
+
+
+@app.post("/api/logout")
+def api_logout():
+    session.clear()
+    return "", 204
+
+
+@app.get("/api/departments")
+def api_departments():
+    return jsonify(run("SELECT * FROM departments ORDER BY id", fetch=True))
+
+
+@app.get("/api/announcements")
+def api_announcements():
+    rows = run("SELECT * FROM announcements ORDER BY created_at DESC, id DESC", fetch=True)
+    return jsonify([ann(r) for r in rows])
+
+
+@app.post("/api/announcements")
+def api_add():
+    denied = guard()
+    if denied:
+        return denied
+    data, error = read_form()
+    if error:
+        return jsonify(error=error), 400
+    row = run("INSERT INTO announcements(title,category,content) VALUES(%s,%s,%s) RETURNING *",
+              data, fetch=True)[0]
+    return jsonify(ann(row)), 201
+
+
+@app.put("/api/announcements/<int:i>")
+def api_edit(i):
+    denied = guard()
+    if denied:
+        return denied
+    data, error = read_form()
+    if error:
+        return jsonify(error=error), 400
+    rows = run("UPDATE announcements SET title=%s, category=%s, content=%s WHERE id=%s RETURNING *",
+               data + (i,), fetch=True)
+    if not rows:
+        return jsonify(error="Announcement not found."), 400
+    return jsonify(ann(rows[0]))
+
+
+@app.delete("/api/announcements/<int:i>")
+def api_delete(i):
+    denied = guard()
+    if denied:
+        return denied
+    run("DELETE FROM announcements WHERE id=%s", (i,))
+    return "", 204
+
+
+def find_file(name):
+    for f in os.listdir(BASE_DIR):
+        if f.lower() == name.lower():
+            return os.path.join(BASE_DIR, f)
+
 
 @app.route("/")
 def home():
-    return render_template("home", items=run("SELECT * FROM announcements ORDER BY created_at DESC LIMIT 3", fetch=True))
+    return site("index.html")
 
-@app.route("/departments")
-def departments():
-    return render_template("depts", items=run("SELECT * FROM departments ORDER BY name", fetch=True))
 
-@app.route("/news")
-def news():
-    return render_template("news", items=run("SELECT * FROM announcements ORDER BY created_at DESC", fetch=True))
+@app.route("/<name>")
+def site(name):
+    low = name.lower()
+    if low == "campus.jpg":
+        for f in IMAGES:
+            if find_file(f):
+                return send_file(find_file(f), max_age=0)
+        abort(404)
+    if low not in SITE_FILES:
+        abort(404)
+    if low == "admin.html" and not session.get("admin"):
+        return redirect("/Login.html")
+    path = find_file(low)
+    if not path:
+        abort(404)
+    return send_file(path, max_age=0)
 
-@app.route("/admin")
-@auth
-def admin():
-    return render_template("admin", items=run("SELECT * FROM announcements ORDER BY created_at DESC", fetch=True))
-
-@app.route("/admin/new", methods=["GET", "POST"])
-@auth
-def new():
-    if request.method == "POST":
-        run("INSERT INTO announcements(title,category,content) VALUES(%s,%s,%s)",
-            (request.form["title"], clean_category(request.form.get("category")), request.form["content"]))
-        return redirect(url_for("admin"))
-    return render_template("form", a=None, cats=CATEGORIES)
-
-@app.route("/admin/<int:i>/edit", methods=["GET", "POST"])
-@auth
-def edit(i):
-    if request.method == "POST":
-        run("UPDATE announcements SET title=%s, category=%s, content=%s WHERE id=%s",
-            (request.form["title"], clean_category(request.form.get("category")), request.form["content"], i))
-        return redirect(url_for("admin"))
-    rows = run("SELECT * FROM announcements WHERE id=%s", (i,), fetch=True)
-    return render_template("form", a=rows[0] if rows else None, cats=CATEGORIES)
-
-@app.route("/admin/<int:i>/delete", methods=["POST"])
-@auth
-def delete(i):
-    run("DELETE FROM announcements WHERE id=%s", (i,))
-    return redirect(url_for("admin"))
 
 init_db()
+

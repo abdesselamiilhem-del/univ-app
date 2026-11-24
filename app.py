@@ -72,7 +72,8 @@ def run(sql, args=(), fetch=False):
     conn = psycopg2.connect(DB_URL, options="-c search_path=%s,public" % SCHEMA)
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql, args)
+                        cur.execute(sql, args or None)
+
             return cur.fetchall() if fetch else None
     finally:
         conn.close()

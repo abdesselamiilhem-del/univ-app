@@ -3,30 +3,36 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: univ
-      POSTGRES_PASSWORD: univpass
-      POSTGRES_DB: univdb
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks: [backend]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U univ -d univdb"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
+      timeout: 5s
       retries: 10
+
   web:
     build: .
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://univ:univpass@db:5432/univdb
-      ADMIN_USER: admin
-      ADMIN_PASSWORD: ChangeMe123
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      ADMIN_USER: ${ADMIN_USER}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY}
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
     networks: [backend]
+
 networks:
   backend:
+
 volumes:
   pgdata:
+

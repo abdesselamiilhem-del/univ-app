@@ -6,7 +6,7 @@ from flask import Flask, request, jsonify, session, send_file, redirect, abort
 app = Flask(__name__)
 DB_URL = os.environ["DATABASE_URL"]
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 app.secret_key = os.environ.get("SECRET_KEY") or hashlib.sha256(
     ("portal|" + ADMIN_PASSWORD + DB_URL).encode()).hexdigest()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
@@ -104,6 +104,11 @@ def api_logout():
     return "", 204
 
 
+@app.get("/health")
+def health():
+    return "ok"
+
+
 @app.get("/api/departments")
 def api_departments():
     return jsonify(run("SELECT * FROM departments ORDER BY id", fetch=True))
@@ -139,7 +144,7 @@ def api_edit(i):
     rows = run("UPDATE announcements SET title=%s, category=%s, content=%s WHERE id=%s RETURNING *",
                data + (i,), fetch=True)
     if not rows:
-        return jsonify(error="Announcement not found."), 400
+        return jsonify(error="Announcement not found."), 404
     return jsonify(ann(rows[0]))
 
 
@@ -182,4 +187,5 @@ def site(name):
 
 
 init_db()
+
 

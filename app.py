@@ -2,7 +2,7 @@ import os, time
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from functools import wraps
-from flask import Flask, request, redirect, url_for, Response, render_template
+from flask import Flask, request, redirect, url_for, Response, render_template, send_file, abort
 from jinja2 import DictLoader
 
 app = Flask(__name__)
@@ -10,6 +10,8 @@ DB_URL = os.environ["DATABASE_URL"]
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 SCHEMA = "umbb"
+CATEGORIES = ["Registrations", "Exams", "Events", "General"]
+IMAGE_FILES = ["campus.jpg", "Image PNG.png"]
 
 BASE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -24,7 +26,9 @@ nav a{margin-right:1.2rem;color:#14365d;font-weight:600;text-decoration:none}
 h2{color:#14365d;margin-top:1.5rem}
 .card{background:#fff;border:1px solid #dde3ea;border-radius:8px;padding:1rem;margin:.8rem 0}
 .card b{color:#14365d}
-input,textarea{width:100%;padding:.6rem;margin:.3rem 0 .9rem;border:1px solid #c5ced8;border-radius:6px;box-sizing:border-box;font:inherit}
+.tag{display:inline-block;background:#e4ecf7;color:#14365d;font-size:.75rem;padding:.1rem .6rem;border-radius:99px;margin-left:.4rem}
+.hero{width:100%;max-height:260px;object-fit:cover;border-radius:8px;margin-bottom:.8rem}
+input,textarea,select{width:100%;padding:.6rem;margin:.3rem 0 .9rem;border:1px solid #c5ced8;border-radius:6px;box-sizing:border-box;font:inherit}
 button{padding:.5rem 1.1rem;background:#14365d;color:#fff;border:0;border-radius:6px;font:inherit}
 small{color:#6b7a89}
 footer{margin-top:2rem;padding-top:1rem;border-top:1px solid #dde3ea;font-size:.8rem;color:#6b7a89}
@@ -36,26 +40,28 @@ footer{margin-top:2rem;padding-top:1rem;border-top:1px solid #dde3ea;font-size:.
 </body></html>"""
 
 HOME = """{% extends 'base' %}{% block c %}
+<img class="hero" src="/campus" alt="Campus" onerror="this.style.display='none'">
 <div class="card"><p>Welcome to the information portal of the University of Boumerdès (Université M'Hamed Bougara de Boumerdès). Students, teachers and visitors can browse the departments and follow the latest announcements.</p></div>
 <h2>Recent announcements</h2>
-{% for a in items %}<div class="card"><b>{{a.title}}</b><br><small>{{a.created_at.strftime('%d/%m/%Y')}}</small><p>{{a.content}}</p></div>
+{% for a in items %}<div class="card"><b>{{a.title}}</b><span class="tag">{{a.category}}</span><br><small>{{a.created_at.strftime('%d/%m/%Y')}}</small><p>{{a.content}}</p></div>
 {% else %}<p>No announcements yet.</p>{% endfor %}{% endblock %}"""
 
 DEPTS = """{% extends 'base' %}{% block c %}<h2>Departments</h2>
 {% for d in items %}<div class="card"><b>{{d.name}}</b><p>{{d.description}}</p></div>{% endfor %}{% endblock %}"""
 
 NEWS = """{% extends 'base' %}{% block c %}<h2>News and announcements</h2>
-{% for a in items %}<div class="card"><b>{{a.title}}</b><br><small>{{a.created_at.strftime('%d/%m/%Y %H:%M')}}</small><p>{{a.content}}</p></div>
+{% for a in items %}<div class="card"><b>{{a.title}}</b><span class="tag">{{a.category}}</span><br><small>{{a.created_at.strftime('%d/%m/%Y %H:%M')}}</small><p>{{a.content}}</p></div>
 {% else %}<p>No announcements yet.</p>{% endfor %}{% endblock %}"""
 
 ADMIN = """{% extends 'base' %}{% block c %}<h2>Administration</h2>
 <p><a href="/admin/new">+ Add announcement</a></p>
-{% for a in items %}<div class="card"><b>{{a.title}}</b><p>{{a.content}}</p>
+{% for a in items %}<div class="card"><b>{{a.title}}</b><span class="tag">{{a.category}}</span><p>{{a.content}}</p>
 <a href="/admin/{{a.id}}/edit">Edit</a>
 <form method="post" action="/admin/{{a.id}}/delete" style="display:inline" onsubmit="return confirm('Delete this announcement?')"><button>Delete</button></form></div>{% endfor %}{% endblock %}"""
 
 FORM = """{% extends 'base' %}{% block c %}<h2>{{'Edit' if a else 'New'}} announcement</h2>
 <form method="post"><label>Title</label><input name="title" required value="{{a.title if a else ''}}">
+<label>Category</label><select name="category">{% for c in cats %}<option value="{{c}}" {% if a and a.category == c %}selected{% endif %}>{{c}}</option>{% endfor %}</select>
 <label>Content</label><textarea name="content" rows="6" required>{{a.content if a else ''}}</textarea>
 <button>Save</button></form>{% endblock %}"""
 
@@ -80,6 +86,7 @@ def init_db():
                    CREATE TABLE IF NOT EXISTS announcements(
                      id SERIAL PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL,
                      created_at TIMESTAMP DEFAULT now());""")
+            run("ALTER TABLE announcements ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'General'")
             if not run("SELECT 1 FROM departments LIMIT 1", fetch=True):
                 run("""INSERT INTO departments(name,description) VALUES
                   ('Computer Science','Software engineering, networks, databases and artificial intelligence.'),
@@ -90,10 +97,13 @@ def init_db():
                   ('Hydrocarbons and Chemistry','Process engineering, petroleum technologies and chemical analysis.'),
                   ('Economics and Management','Finance, accounting, marketing and business administration.'),
                   ('Languages and Literature','Arabic, French and English language and literature studies.');
-                  INSERT INTO announcements(title,content) VALUES
-                  ('Registration for the new academic year','Online registration is open for continuing students. Please check the schedule published by your department.'),
-                  ('Library opening hours during exams','The central library extends its opening hours throughout the examination period.'),
-                  ('Cloud Computing project presentations','Student groups will present their projects during the last practical session.');""")
+                  INSERT INTO announcements(title,category,content) VALUES
+                  ('Registration for the new academic year','Registrations','Online registration is open for continuing students. Please check the schedule published by your department.'),
+                  ('Library opening hours during exams','Exams','The central library extends its opening hours throughout the examination period.'),
+                  ('Cloud Computing project presentations','Events','Student groups will present their projects during the last practical session.');""")
+            run("UPDATE announcements SET category='Registrations' WHERE title LIKE 'Registration%' AND category='General'")
+            run("UPDATE announcements SET category='Exams' WHERE title LIKE 'Library opening%' AND category='General'")
+            run("UPDATE announcements SET category='Events' WHERE title LIKE 'Cloud Computing project%' AND category='General'")
             return
         except psycopg2.OperationalError:
             time.sleep(2)
@@ -107,6 +117,18 @@ def auth(f):
             return Response("Login required", 401, {"WWW-Authenticate": 'Basic realm="Admin"'})
         return f(*a, **k)
     return w
+
+def clean_category(value):
+    return value if value in CATEGORIES else "General"
+
+@app.route("/campus")
+def campus():
+    base = os.path.dirname(os.path.abspath(__file__))
+    for name in IMAGE_FILES:
+        path = os.path.join(base, name)
+        if os.path.exists(path):
+            return send_file(path)
+    abort(404)
 
 @app.route("/")
 def home():
@@ -129,18 +151,20 @@ def admin():
 @auth
 def new():
     if request.method == "POST":
-        run("INSERT INTO announcements(title,content) VALUES(%s,%s)", (request.form["title"], request.form["content"]))
+        run("INSERT INTO announcements(title,category,content) VALUES(%s,%s,%s)",
+            (request.form["title"], clean_category(request.form.get("category")), request.form["content"]))
         return redirect(url_for("admin"))
-    return render_template("form", a=None)
+    return render_template("form", a=None, cats=CATEGORIES)
 
 @app.route("/admin/<int:i>/edit", methods=["GET", "POST"])
 @auth
 def edit(i):
     if request.method == "POST":
-        run("UPDATE announcements SET title=%s, content=%s WHERE id=%s", (request.form["title"], request.form["content"], i))
+        run("UPDATE announcements SET title=%s, category=%s, content=%s WHERE id=%s",
+            (request.form["title"], clean_category(request.form.get("category")), request.form["content"], i))
         return redirect(url_for("admin"))
     rows = run("SELECT * FROM announcements WHERE id=%s", (i,), fetch=True)
-    return render_template("form", a=rows[0] if rows else None)
+    return render_template("form", a=rows[0] if rows else None, cats=CATEGORIES)
 
 @app.route("/admin/<int:i>/delete", methods=["POST"])
 @auth
@@ -149,6 +173,7 @@ def delete(i):
     return redirect(url_for("admin"))
 
 init_db()
+
 
 
 
